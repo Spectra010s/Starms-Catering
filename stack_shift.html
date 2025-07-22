@@ -1,0 +1,222 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StackShift - XPVerse</title>
+  <style>
+    body { 
+      margin: 0; 
+      display: flex; 
+      flex-direction: column; 
+      justify-content: center; 
+      align-items: center; 
+      height: 100vh; 
+      background: #111; 
+      font-family: Arial, sans-serif;
+      color: #0ff;
+    }
+    canvas { 
+      border: 2px solid #0ff; 
+      background: #222; 
+    }
+    #ui { 
+      position: absolute; 
+      top: 10px; 
+      left: 10px; 
+      color: #0ff; 
+    }
+    #leaderboard { 
+      position: absolute; 
+      top: 10px; 
+      right: 10px; 
+      color: #0ff; 
+    }
+    button { 
+      margin: 10px; 
+      padding: 10px; 
+      background: #0ff; 
+      color: #000; 
+      border: none; 
+      cursor: pointer; 
+      font-size: 16px; 
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">Score: <span id="score">0</span> | XP: <span id="xp">0</span> | Wisdom: <span id="wisdom">0</span></div>
+  <div id="leaderboard">Leaderboard: <span id="topScores">Loading...</span></div>
+  <canvas id="gameCanvas" width="400" height="400"></canvas>
+  <button onclick="startGame()">New Game</button>
+  <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.95.3/lib/index.iife.min.js"></script>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreDisplay = document.getElementById('score');
+    const xpDisplay = document.getElementById('xp');
+    const wisdomDisplay = document.getElementById('wisdom');
+    const leaderboardDisplay = document.getElementById('topScores');
+
+    // Game state
+    const gridSize = 4;
+    let grid = Array(gridSize).fill().map(() => Array(gridSize).fill(0));
+    let score = 0;
+    let xp = 0;
+    let wisdom = 0;
+    let gameOver = false;
+
+    // Tile values (blockchain-themed)
+    const tileValues = ['SOL', 'NFT', 'Token', 'Block', 'Chain', 'Wallet', 'DEX', 'Stake'];
+    const tileColors = ['#0ff', '#f0f', '#ff0', '#0f0', '#f00', '#00f', '#ffa500', '#fff'];
+
+    // Mock Honeycomb integration
+    async function logMissionToHoneycomb(game, score, xp, traitLevel) {
+      console.log(`Logging mission: ${game}, Score: ${score}, XP: ${xp}, Wisdom: ${traitLevel}`);
+      // Replace with Honeycomb SDK: await honeycomb.logMission({ game, score, xp, trait: 'Wisdom', level: traitLevel });
+    }
+
+    // Mock Verxio leaderboard
+    async function updateLeaderboard(score) {
+      console.log(`Submitting score to Verxio: ${score}`);
+      // Replace with Verxio API: await verxio.submitScore({ player: 'wallet_pubkey', score });
+      leaderboardDisplay.textContent = `Top Scores: ${score}, 1000, 500`; // Mock data
+    }
+
+    // Initialize grid with two tiles
+    function addTile() {
+      let empty = [];
+      for (let i = 0; i < gridSize; i++) {
+        for (let j = 0; j < gridSize; j++) {
+          if (grid[i][j] === 0) empty.push([i, j]);
+        }
+      }
+      if (empty.length) {
+        const [i, j] = empty[Math.floor(Math.random() * empty.length)];
+        grid[i][j] = Math.random() < 0.9 ? 1 : 2; // SOL or NFT
+      }
+    }
+
+    // Draw grid
+    function drawGrid() {
+      ctx.fillStyle = '#222';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const tileSize = canvas.width / gridSize;
+      for (let i = 0; i < gridSize; i++) {
+        for (let j = 0; j < gridSize; j++) {
+          const value = grid[i][j];
+          ctx.fillStyle = value ? tileColors[value - 1] : '#333';
+          ctx.fillRect(j * tileSize, i * tileSize, tileSize - 5, tileSize - 5);
+          if (value) {
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = '20px Arial';
+            ctx.fillText(tileValues[value - 1], j * tileSize + tileSize / 2, i * tileSize + tileSize / 2);
+          }
+        }
+      }
+    }
+
+    // Move tiles
+    function move(direction) {
+      let moved = false;
+      let newGrid = Array(gridSize).fill().map(() => Array(gridSize).fill(0));
+      if (direction === 'up' || direction === 'down') {
+        for (let j = 0; j < gridSize; j++) {
+          let col = [];
+          for (let i = 0; i < gridSize; i++) col.push(grid[i][j]);
+          if (direction === 'down') col.reverse();
+          let newCol = slideAndMerge(col);
+          if (direction === 'down') newCol.reverse();
+          for (let i = 0; i < gridSize; i++) newGrid[i][j] = newCol[i];
+          if (newCol.join() !== col.join()) moved = true;
+        }
+      } else {
+        for (let i = 0; i < gridSize; i++) {
+          let row = grid[i].slice();
+          if (direction === 'right') row.reverse();
+          let newRow = slideAndMerge(row);
+          if (direction === 'right') newRow.reverse();
+          newGrid[i] = newRow;
+          if (newRow.join() !== row.join()) moved = true;
+        }
+      }
+      if (moved) {
+        grid = newGrid;
+        addTile();
+        updateScore();
+        drawGrid();
+        checkGameOver();
+      }
+    }
+
+    // Slide and merge tiles
+    function slideAndMerge(line) {
+      let newLine = line.filter(x => x);
+      for (let i = 0; i < newLine.length - 1; i++) {
+        if (newLine[i] === newLine[i + 1] && newLine[i] !== 0) {
+          newLine[i]++;
+          score += 2 ** newLine[i];
+          newLine.splice(i + 1, 1);
+        }
+      }
+      while (newLine.length < gridSize) newLine.push(0);
+      return newLine;
+    }
+
+    // Update score and XP
+    function updateScore() {
+      scoreDisplay.textContent = score;
+      xp = Math.floor(score / 10);
+      xpDisplay.textContent = xp;
+      wisdom = score >= 2048 ? 2 : score >= 1024 ? 1 : 0;
+      wisdomDisplay.textContent = wisdom;
+    }
+
+    // Check game over
+    function checkGameOver() {
+      for (let i = 0; i < gridSize; i++) {
+        for (let j = 0; j < gridSize; j++) {
+          if (grid[i][j] === 0) return;
+          if (j < gridSize - 1 && grid[i][j] === grid[i][j + 1]) return;
+          if (i Ascending
+System: * Today's date and time is 02:52 PM WAT on Friday, July 18, 2025.
